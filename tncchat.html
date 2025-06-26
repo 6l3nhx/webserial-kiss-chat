@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSerial TNC Chat with KISS</title>
+    <!-- Using Tailwind CSS for styling from a CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .log-area::-webkit-scrollbar, .conversations::-webkit-scrollbar { width: 8px; }
+        .log-area::-webkit-scrollbar-track, .conversations::-webkit-scrollbar-track { background: #f1f1f1; }
+        .log-area::-webkit-scrollbar-thumb, .conversations::-webkit-scrollbar-thumb { background: #888; border-radius: 4px; }
+        .log-area::-webkit-scrollbar-thumb:hover, .conversations::-webkit-scrollbar-thumb:hover { background: #555; }
+        .modal { transition: opacity 0.3s ease; }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+
+    <!-- Main Application Window -->
+    <div class="w-full max-w-4xl h-[80vh] bg-white rounded-lg shadow-xl flex flex-col relative">
+        <!-- Header -->
+        <div class="flex-shrink-0 flex justify-between items-center p-4 border-b">
+            <h1 class="text-xl font-bold text-gray-800">WebSerial TNC Chat</h1>
+            <div class="flex items-center space-x-4">
+                 <div class="flex items-center space-x-2">
+                    <input type="checkbox" id="digipeat-checkbox" class="h-4 w-4 rounded text-blue-600 focus:ring-blue-500">
+                    <label for="digipeat-checkbox" class="text-gray-600 font-medium select-none">Digipeat</label>
+                 </div>
+                 <div class="flex items-center space-x-2">
+                    <span id="status-indicator" class="h-3 w-3 rounded-full bg-red-500" title="Disconnected"></span>
+                    <span id="status-text" class="text-gray-600 font-medium">Disconnected</span>
+                 </div>
+                 <button id="connect-btn" class="bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-300">Connect</button>
+            </div>
+        </div>
+
+        <!-- Main Chat Area -->
+        <div id="main-chat-area" class="flex-grow flex min-h-0">
+            <!-- Left Column: Conversations List -->
+            <div class="w-1/3 border-r flex flex-col bg-gray-50">
+                <div class="p-3 border-b">
+                    <h2 class="font-semibold text-gray-700">Conversations</h2>
+                </div>
+                <div id="destinations-list" class="conversations flex-grow overflow-y-auto">
+                    <!-- Destination items will be injected here -->
+                </div>
+            </div>
+
+            <!-- Right Column: Chat Log and Input -->
+            <div class="w-2/3 flex flex-col">
+                <div id="log" class="log-area flex-grow p-4 space-y-4 overflow-y-auto">
+                    <!-- Message bubbles will be injected here -->
+                </div>
+                <div id="input-area" class="flex-shrink-0 p-4 bg-gray-100 border-t">
+                    <div class="flex items-center space-x-3">
+                        <input type="text" id="destCallsignInput" class="border border-gray-300 rounded-lg px-4 py-2 w-36 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="DEST">
+                        <input type="text" id="messageInput" class="flex-grow border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Select a conversation...">
+                        <button id="sendButton" class="bg-indigo-600 text-white font-bold py-2 px-5 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50 transition-colors duration-300">
+                            Send
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Callsign Modal -->
+    <div id="callsign-modal" class="hidden modal fixed inset-0 bg-gray-900 bg-opacity-60 flex items-center justify-center z-50">
+        <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-sm">
+            <h2 class="text-xl font-bold mb-4">Enter Your Callsign</h2>
+            <p class="text-sm text-gray-600 mb-4">Your callsign is required to send packets and is saved locally for future sessions.</p>
+            <input type="text" id="modalCallsignInput" class="w-full border border-gray-300 rounded-lg px-4 py-2 mb-4 uppercase" placeholder="YOUR-CALLSIGN">
+            <div class="flex justify-end space-x-3">
+                <button id="cancelConnectButton" class="bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-400">Cancel</button>
+                <button id="saveAndConnectButton" class="bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700">Save & Connect</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="delete-confirm-modal" class="hidden modal fixed inset-0 bg-gray-900 bg-opacity-60 flex items-center justify-center z-50">
+        <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-sm">
+            <h2 class="text-xl font-bold mb-4">Confirm Deletion</h2>
+            <p id="delete-confirm-text" class="text-sm text-gray-600 mb-6"></p>
+            <div class="flex justify-end space-x-3">
+                <button id="cancelDeleteButton" class="bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-400">Cancel</button>
+                <button id="confirmDeleteButton" class="bg-red-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-700">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- DOM Element References ---
+        const connectBtn = document.getElementById('connect-btn');
+        const digipeatCheckbox = document.getElementById('digipeat-checkbox');
+        const destinationsList = document.getElementById('destinations-list');
+        const log = document.getElementById('log');
+        const destCallsignInput = document.getElementById('destCallsignInput');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const statusIndicator = document.getElementById('status-indicator');
+        const statusText = document.getElementById('status-text');
+        
+        const callsignModal = document.getElementById('callsign-modal');
+        const modalCallsignInput = document.getElementById('modalCallsignInput');
+        const cancelConnectButton = document.getElementById('cancelConnectButton');
+        const saveAndConnectButton = document.getElementById('saveAndConnectButton');
+
+        const deleteConfirmModal = document.getElementById('delete-confirm-modal');
+        const deleteConfirmText = document.getElementById('delete-confirm-text');
+        const cancelDeleteButton = document.getElementById('cancelDeleteButton');
+        const confirmDeleteButton = document.getElementById('confirmDeleteButton');
+
+        // --- State Variables ---
+        let port, reader, writer;
+        let isConnected = false;
+        let isDigipeaterEnabled = false;
+        let userCallsign = '';
+        const CALLSIGN_STORAGE_KEY = 'tncChatCallsign';
+        const MESSAGES_STORAGE_KEY = 'tncChatMessages';
+        let allMessages = [];
+        let conversations = {};
+        let selectedDestination = 'All';
+        let seenPackets = new Set();
+        let seenPacketQueue = [];
+        let seenPacketCleanerInterval;
+        const SEEN_PACKET_LIFETIME_MS = 30000; // 30 seconds
+
+        // --- KISS Protocol Constants ---
+        const FEND = 0xC0, FESC = 0xDB, TFEND = 0xDC, TFESC = 0xDD, CMD_DATA = 0x00;
+
+        // --- Event Listeners ---
+        window.addEventListener('load', initializeAppUI);
+        connectBtn.addEventListener('click', handleConnectionToggle);
+        digipeatCheckbox.addEventListener('change', (e) => isDigipeaterEnabled = e.target.checked);
+        
+        cancelConnectButton.addEventListener('click', () => callsignModal.classList.add('hidden'));
+        saveAndConnectButton.addEventListener('click', handleSaveAndConnect);
+        
+        cancelDeleteButton.addEventListener('click', () => deleteConfirmModal.classList.add('hidden'));
+        
+        sendButton.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keyup', (event) => {
+            if (event.key === 'Enter') sendMessage();
+        });
+
+        // --- Initialization and State Management ---
+        function initializeAppUI() {
+            loadSettings();
+            updateDestinationsList();
+            selectDestination('All');
+        }
+
+        function loadSettings() {
+            const savedCallsign = localStorage.getItem(CALLSIGN_STORAGE_KEY);
+            if (savedCallsign) {
+                userCallsign = savedCallsign;
+                modalCallsignInput.value = userCallsign;
+            }
+            const savedMessages = localStorage.getItem(MESSAGES_STORAGE_KEY);
+            if (savedMessages) {
+                allMessages = JSON.parse(savedMessages);
+                rebuildConversationsFromMessages();
+            }
+        }
+
+        function rebuildConversationsFromMessages() {
+            conversations = {};
+            allMessages.forEach(msg => {
+                msg.timestamp = new Date(msg.timestamp);
+                if (msg.type === 'sent' || msg.type === 'received') {
+                    const partner = msg.type === 'sent' ? msg.destination : msg.source;
+                    if (!conversations[partner]) conversations[partner] = [];
+                    conversations[partner].push(msg);
+                }
+            });
+        }
+
+        async function handleConnectionToggle() {
+            if (isConnected) await disconnect();
+            else if (!userCallsign) callsignModal.classList.remove('hidden');
+            else await connect();
+        }
+
+        async function handleSaveAndConnect() {
+            const callsign = modalCallsignInput.value.trim().toUpperCase();
+            if (!callsign) { alert("Please enter a callsign."); return; }
+            userCallsign = callsign;
+            localStorage.setItem(CALLSIGN_STORAGE_KEY, userCallsign);
+            callsignModal.classList.add('hidden');
+            await connect();
+        }
+
+        async function connect() {
+            if (!('serial' in navigator)) { alert('Web Serial API not supported.'); return; }
+            try {
+                port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 57600 });
+                writer = port.writable.getWriter();
+                reader = port.readable.getReader();
+                isConnected = true;
+                updateUIForConnection();
+                seenPacketCleanerInterval = setInterval(cleanSeenPackets, 5000);
+                listenForData();
+            } catch (error) { logMessage({ type: 'error', content: `Connection failed: ${error.message}`, timestamp: new Date() }); }
+        }
+
+        async function disconnect() {
+            if (reader) await reader.cancel();
+            if (writer) await writer.close();
+            if (port) await port.close();
+            clearInterval(seenPacketCleanerInterval);
+            port = reader = writer = null;
+            isConnected = false;
+            updateUIForDisconnection();
+        }
+
+        // --- Deletion and Digipeater Logic ---
+        function showDeleteConfirmModal(destination) {
+            deleteConfirmText.textContent = `Are you sure you want to delete the entire conversation with ${destination}? This action cannot be undone.`;
+            confirmDeleteButton.onclick = () => {
+                deleteConversation(destination);
+                deleteConfirmModal.classList.add('hidden');
+            };
+            deleteConfirmModal.classList.remove('hidden');
+        }
+
+        function deleteConversation(destination) {
+            allMessages = allMessages.filter(msg => {
+                if (msg.type === 'sent') return msg.destination !== destination;
+                if (msg.type === 'received') return msg.source !== destination;
+                return true;
+            });
+            delete conversations[destination];
+            localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(allMessages));
+            if (selectedDestination === destination) selectDestination('All');
+            else { updateDestinationsList(); renderMessages(); }
+            logMessage({ type: 'system', content: `Conversation with ${destination} deleted.`, timestamp: new Date() });
+        }
+
+        function cleanSeenPackets() {
+            const now = Date.now();
+            while (seenPacketQueue.length > 0 && seenPacketQueue[0].timestamp < now - SEEN_PACKET_LIFETIME_MS) {
+                const expiredPacket = seenPacketQueue.shift();
+                seenPackets.delete(expiredPacket.id);
+            }
+        }
+
+        async function digipeatPacket(ax25Data) {
+            if (!writer) return;
+            const kissFrame = [CMD_DATA, ...ax25Data];
+            const finalPacket = new Uint8Array([FEND, ...kissFrame, FEND]);
+            try {
+                await writer.write(finalPacket);
+                const source = decodeCallsign(ax25Data.slice(7, 14));
+                logMessage({ type: 'system', content: `Digipeated packet from ${source}`, timestamp: new Date() });
+            } catch (error) {
+                logMessage({ type: 'error', content: `Digipeat failed: ${error.message}`, timestamp: new Date() });
+                await disconnect();
+            }
+        }
+
+        // --- KISS and AX.25 Logic ---
+        function encodeCallsign(callsignStr) {
+            const parts = callsignStr.split('-');
+            const call = parts[0].padEnd(6, ' ');
+            const ssid = parts.length > 1 ? parseInt(parts[1], 10) : 0;
+            const buffer = new Uint8Array(7);
+            for (let i = 0; i < 6; i++) { buffer[i] = call.charCodeAt(i) << 1; }
+            buffer[6] = (0b01100000) | (ssid << 1);
+            return buffer;
+        }
+
+        function decodeCallsign(buffer) {
+            let call = '';
+            for (let i = 0; i < 6; i++) { call += String.fromCharCode(buffer[i] >> 1); }
+            call = call.trim();
+            const ssid = (buffer[6] >> 1) & 0x0F;
+            if (ssid > 0) call += '-' + ssid;
+            return call;
+        }
+
+        async function sendMessage() {
+            const destCall = (selectedDestination === 'All' ? destCallsignInput.value.trim().toUpperCase() : selectedDestination);
+            const info = messageInput.value;
+            if (!destCall || !info || !writer) return;
+
+            const destAddr = encodeCallsign(destCall), srcAddr = encodeCallsign(userCallsign);
+            srcAddr[6] |= 0b00000001;
+            const ax25Packet = new Uint8Array([ ...destAddr, ...srcAddr, 0x03, 0xF0, ...new TextEncoder().encode(info) ]);
+            const kissFrame = [CMD_DATA];
+            for (const byte of ax25Packet) {
+                if (byte === FEND) kissFrame.push(FESC, TFEND);
+                else if (byte === FESC) kissFrame.push(FESC, TFESC);
+                else kissFrame.push(byte);
+            }
+            const finalPacket = new Uint8Array([FEND, ...kissFrame, FEND]);
+
+            try {
+                await writer.write(finalPacket);
+                const messageObj = { type: 'sent', destination: destCall, source: userCallsign, content: info, timestamp: new Date() };
+                logMessage(messageObj);
+                messageInput.value = '';
+            } catch (error) {
+                logMessage({ type: 'error', content: `Send error: ${error.message}`, timestamp: new Date() });
+                await disconnect();
+            }
+        }
+
+        async function listenForData() {
+            let buffer = [], inFrame = false;
+            logMessage({ type: 'system', content: 'Listening for data...', timestamp: new Date() });
+            try {
+                while (port && port.readable) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    for (const byte of value) {
+                        if (byte === FEND) {
+                            if (inFrame && buffer.length > 0) processKissFrame(new Uint8Array(buffer));
+                            buffer = []; inFrame = true;
+                        } else if (inFrame) { buffer.push(byte); }
+                    }
+                }
+            } catch (error) { logMessage({ type: 'error', content: `Read error: ${error.message}`, timestamp: new Date() }); await disconnect(); }
+        }
+
+        function processKissFrame(frame) {
+            const unescaped = [];
+            for (let i = 0; i < frame.length; i++) {
+                if (frame[i] === FESC) { i++; if (frame[i] === TFEND) unescaped.push(FEND); else if (frame[i] === TFESC) unescaped.push(FESC); } 
+                else { unescaped.push(frame[i]); }
+            }
+            if (unescaped.shift() !== CMD_DATA || unescaped.length < 16) return;
+
+            const ax25Data = new Uint8Array(unescaped);
+            const packetHash = `${ax25Data.slice(7, 14).toString()}-${ax25Data.slice(16).toString()}`;
+            if (seenPackets.has(packetHash)) return;
+
+            seenPackets.add(packetHash);
+            seenPacketQueue.push({ id: packetHash, timestamp: Date.now() });
+            
+            logMessage({
+                type: 'received',
+                destination: decodeCallsign(ax25Data.slice(0, 7)),
+                source: decodeCallsign(ax25Data.slice(7, 14)),
+                content: new TextDecoder().decode(ax25Data.slice(16)),
+                timestamp: new Date()
+            });
+
+            if (isDigipeaterEnabled) digipeatPacket(ax25Data);
+        }
+
+        // --- UI Rendering ---
+        function selectDestination(dest) {
+            selectedDestination = dest;
+            destCallsignInput.classList.toggle('hidden', dest !== 'All');
+            messageInput.placeholder = dest === 'All' ? 'Type your message...' : `Message to ${dest}...`;
+            renderMessages();
+            updateDestinationsList();
+        }
+
+        function renderMessages() {
+            log.innerHTML = '';
+            const messagesToRender = selectedDestination === 'All' ? allMessages : (conversations[selectedDestination] || []);
+            
+            messagesToRender.forEach(msg => {
+                let bubble;
+                if (msg.type === 'sent') {
+                    bubble = `<div class="flex justify-end"><div class="bg-blue-500 text-white p-3 rounded-lg max-w-md" style="word-break: break-word;"><div>${msg.content}</div><div class="text-xs text-blue-200 text-right mt-1">${new Date(msg.timestamp).toLocaleTimeString()}</div></div></div>`;
+                } else if (msg.type === 'received') {
+                    bubble = `<div class="flex justify-start"><div class="bg-gray-200 text-gray-800 p-3 rounded-lg max-w-md" style="word-break: break-word;"><div><span class="font-bold text-sm">${msg.source}</span></div><div>${msg.content}</div><div class="text-xs text-gray-500 text-right mt-1">${new Date(msg.timestamp).toLocaleTimeString()}</div></div></div>`;
+                } else {
+                     bubble = `<div class="text-center text-sm text-gray-500 italic py-2">${msg.content} (${new Date(msg.timestamp).toLocaleTimeString()})</div>`;
+                }
+                log.innerHTML += bubble;
+            });
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function updateDestinationsList() {
+            destinationsList.innerHTML = '';
+            const partners = [...new Set(Object.keys(conversations))].sort();
+            const allDests = ['All', ...partners];
+            allDests.forEach(dest => {
+                const item = document.createElement('div');
+                item.className = `flex justify-between items-center pr-2 cursor-pointer border-b hover:bg-gray-200 ${selectedDestination === dest ? 'bg-blue-100' : ''}`;
+                
+                const callsignSpan = document.createElement('span');
+                callsignSpan.className = `flex-grow p-3 ${selectedDestination === dest ? 'font-semibold' : ''}`;
+                callsignSpan.textContent = dest;
+                callsignSpan.onclick = () => selectDestination(dest);
+                item.appendChild(callsignSpan);
+
+                if (dest !== 'All') {
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.innerHTML = '&#x2715;';
+                    deleteBtn.className = 'text-gray-400 hover:text-red-500 font-bold px-2 rounded-full hover:bg-red-100';
+                    deleteBtn.title = `Delete conversation with ${dest}`;
+                    deleteBtn.onclick = (e) => { e.stopPropagation(); showDeleteConfirmModal(dest); };
+                    item.appendChild(deleteBtn);
+                }
+                destinationsList.appendChild(item);
+            });
+        }
+        
+        function logMessage(messageObj) {
+            allMessages.push(messageObj);
+            rebuildConversationsFromMessages();
+            localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(allMessages));
+            renderMessages();
+            updateDestinationsList();
+        }
+
+        function updateUIForConnection() {
+            statusIndicator.className = 'h-3 w-3 rounded-full bg-green-500';
+            statusText.textContent = `Connected (${userCallsign})`;
+            connectBtn.textContent = 'Disconnect';
+            connectBtn.className = 'bg-red-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors duration-300';
+        }
+        
+        function updateUIForDisconnection() {
+            statusIndicator.className = 'h-3 w-3 rounded-full bg-red-500';
+            statusText.textContent = 'Disconnected';
+            connectBtn.textContent = 'Connect';
+            connectBtn.className = 'bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-300';
+            logMessage({ type: 'system', content: 'Disconnected.', timestamp: new Date() });
+        }
+
+    </script>
+</body>
+</html>
