@@ -338,12 +338,47 @@
         }
 
         async function disconnect() {
-            if (reader) await reader.cancel();
-            if (writer) await writer.close();
-            if (port) await port.close();
+            // Prevent re-entry if disconnect is already in progress or completed
+            if (!isConnected) {
+                return;
+            }
+            isConnected = false; // Set immediately to block other calls
+
             clearInterval(seenPacketCleanerInterval);
-            port = reader = writer = null;
-            isConnected = false;
+
+            // Try to close the writer, ignoring errors.
+            if (writer) {
+                try {
+                    await writer.close();
+                } catch (e) {
+                    console.error("Error closing writer:", e);
+                }
+            }
+            
+            // Try to cancel the reader, ignoring errors.
+            if (reader) {
+                try {
+                    await reader.cancel();
+                } catch (e) {
+                    console.error("Error cancelling reader:", e);
+                }
+            }
+
+            // Try to close the port, ignoring errors.
+            if (port) {
+                try {
+                    await port.close();
+                } catch (e) {
+                    console.error("Error closing port:", e);
+                }
+            }
+
+            // Reset state variables
+            port = null;
+            reader = null;
+            writer = null;
+
+            // Update the UI
             updateUIForDisconnection();
         }
 
