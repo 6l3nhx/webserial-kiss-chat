@@ -4,64 +4,192 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebSerial TNC Chat with KISS</title>
-    <!-- Using Tailwind CSS for styling from a CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { font-family: 'Inter', sans-serif; }
+        /* General Body and Font Styles */
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f7fafc;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 1rem;
+            box-sizing: border-box;
+        }
+
+        /* Main Application Container */
+        .app-container {
+            width: 100%;
+            max-width: 56rem; /* 900px */
+            height: 80vh;
+            background-color: #fff;
+            border-radius: 0.5rem;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        /* Header Styles */
+        .app-header {
+            flex-shrink: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .app-header h1 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #2d3748;
+        }
+        .header-controls { display: flex; align-items: center; gap: 1rem; }
+        .status-display { display: flex; align-items: center; gap: 0.5rem; }
+        #status-indicator { height: 0.75rem; width: 0.75rem; border-radius: 9999px; }
+        #status-text { color: #4a5568; font-weight: 500; }
+        .digipeat-control { display: flex; align-items: center; gap: 0.5rem; }
+        .digipeat-control label { color: #4a5568; font-weight: 500; user-select: none; }
+        #digipeat-checkbox { height: 1rem; width: 1rem; border-radius: 0.25rem; }
+
+        /* Main Chat Area Layout */
+        .main-chat-area { flex-grow: 1; display: flex; min-height: 0; }
+        .conversations-panel { width: 33.333%; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; background-color: #f7fafc; }
+        .conversations-panel h2 { font-weight: 600; color: #4a5568; }
+        .panel-header { padding: 0.75rem; border-bottom: 1px solid #e2e8f0; }
+        #destinations-list { flex-grow: 1; overflow-y: auto; }
+        .chat-panel { width: 66.667%; display: flex; flex-direction: column; }
+        #log { flex-grow: 1; padding: 1rem; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem; }
+        .input-area { flex-shrink: 0; padding: 1rem; background-color: #f7fafc; border-top: 1px solid #e2e8f0; }
+        .input-area-flex { display: flex; align-items: center; gap: 0.75rem; }
+
+        /* Conversation List Item Styles */
+        .conversation-item { display: flex; justify-content: space-between; align-items: center; padding-right: 0.5rem; cursor: pointer; border-bottom: 1px solid #e2e8f0; }
+        .conversation-item:hover { background-color: #edf2f7; }
+        .conversation-item.selected { background-color: #ebf8ff; }
+        .conversation-callsign { flex-grow: 1; padding: 0.75rem; }
+        .conversation-callsign.selected { font-weight: 600; }
+        .delete-btn { color: #a0aec0; background: none; border: none; font-weight: 700; padding: 0.5rem; border-radius: 9999px; cursor: pointer; }
+        .delete-btn:hover { color: #ef4444; background-color: #fee2e2; }
+        
+        /* Message Bubbles */
+        .bubble-sent-wrapper { display: flex; justify-content: flex-end; }
+        .bubble-received-wrapper { display: flex; justify-content: flex-start; }
+        .bubble { padding: 0.75rem; border-radius: 0.5rem; max-width: 70%; word-break: break-word; }
+        .bubble-sent { background-color: #3b82f6; color: white; }
+        .bubble-received { background-color: #e5e7eb; color: #1f2937; }
+        .bubble-timestamp { font-size: 0.75rem; text-align: right; margin-top: 0.25rem; }
+        .bubble-sent .bubble-timestamp { color: #bfdbfe; }
+        .bubble-received .bubble-timestamp { color: #6b7280; }
+        .bubble-source { font-weight: 700; font-size: 0.875rem; margin-bottom: 0.25rem; }
+        .bubble-ack { font-size: 0.75rem; text-align: right; margin-top: 0.25rem; color: #bfdbfe; }
+        .system-message { text-align: center; font-size: 0.875rem; color: #6b7280; font-style: italic; padding: 0.5rem 0; }
+
+        /* Forms and Inputs */
+        input[type="text"] {
+            border: 1px solid #d1d5db;
+            border-radius: 0.375rem;
+            padding: 0.5rem 1rem;
+            flex-grow: 1;
+        }
+        input[type="text"]:focus { outline: none; box-shadow: 0 0 0 2px #6366f1; }
+        #destCallsignInput { width: 9rem; flex-grow: 0; }
+        
+        /* Buttons */
+        .btn {
+            font-weight: 700;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .btn:focus { outline: none; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); }
+        .btn-blue { background-color: #3b82f6; color: white; }
+        .btn-blue:hover { background-color: #2563eb; }
+        .btn-red { background-color: #ef4444; color: white; }
+        .btn-red:hover { background-color: #dc2626; }
+        .btn-indigo { background-color: #6366f1; color: white; }
+        .btn-indigo:hover { background-color: #4f46e5; }
+        .btn-gray { background-color: #d1d5db; color: #1f2937; }
+        .btn-gray:hover { background-color: #9ca3af; }
+
+        /* Modal Styles */
+        .modal {
+            display: none; /* Changed from 'hidden' to 'none' */
+            position: fixed;
+            inset: 0;
+            background-color: rgba(17, 24, 39, 0.6);
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+        }
+        .modal-content {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            width: 100%;
+            max-width: 24rem;
+        }
+        .modal-content h2 { font-size: 1.25rem; font-weight: 700; margin-bottom: 1rem; }
+        .modal-content p { font-size: 0.875rem; color: #4a5568; margin-bottom: 1rem; }
+        .modal-content input { width: 100%; box-sizing: border-box; margin-bottom: 1rem; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 0.75rem; }
+
+        /* Utility */
+        .hidden { display: none; }
+        
+        /* Scrollbar */
         .log-area::-webkit-scrollbar, .conversations::-webkit-scrollbar { width: 8px; }
         .log-area::-webkit-scrollbar-track, .conversations::-webkit-scrollbar-track { background: #f1f1f1; }
         .log-area::-webkit-scrollbar-thumb, .conversations::-webkit-scrollbar-thumb { background: #888; border-radius: 4px; }
         .log-area::-webkit-scrollbar-thumb:hover, .conversations::-webkit-scrollbar-thumb:hover { background: #555; }
-        .modal { transition: opacity 0.3s ease; }
     </style>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
 
     <!-- Main Application Window -->
-    <div class="w-full max-w-4xl h-[80vh] bg-white rounded-lg shadow-xl flex flex-col relative">
+    <div class="app-container">
         <!-- Header -->
-        <div class="flex-shrink-0 flex justify-between items-center p-4 border-b">
-            <h1 class="text-xl font-bold text-gray-800">WebSerial TNC Chat</h1>
-            <div class="flex items-center space-x-4">
-                 <div class="flex items-center space-x-2">
-                    <input type="checkbox" id="digipeat-checkbox" class="h-4 w-4 rounded text-blue-600 focus:ring-blue-500">
-                    <label for="digipeat-checkbox" class="text-gray-600 font-medium select-none">Digipeat</label>
+        <div class="app-header">
+            <h1>WebSerial TNC Chat</h1>
+            <div class="header-controls">
+                 <div class="digipeat-control">
+                    <input type="checkbox" id="digipeat-checkbox">
+                    <label for="digipeat-checkbox">Digipeat</label>
                  </div>
-                 <div class="flex items-center space-x-2">
-                    <span id="status-indicator" class="h-3 w-3 rounded-full bg-red-500" title="Disconnected"></span>
-                    <span id="status-text" class="text-gray-600 font-medium">Disconnected</span>
+                 <div class="status-display">
+                    <span id="status-indicator" style="background-color: #ef4444;"></span>
+                    <span id="status-text">Disconnected</span>
                  </div>
-                 <button id="connect-btn" class="bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-300">Connect</button>
+                 <button id="connect-btn" class="btn btn-blue">Connect</button>
             </div>
         </div>
 
         <!-- Main Chat Area -->
-        <div id="main-chat-area" class="flex-grow flex min-h-0">
+        <div id="main-chat-area" class="main-chat-area">
             <!-- Left Column: Conversations List -->
-            <div class="w-1/3 border-r flex flex-col bg-gray-50">
-                <div class="p-3 border-b">
-                    <h2 class="font-semibold text-gray-700">Conversations</h2>
+            <div class="conversations-panel">
+                <div class="panel-header">
+                    <h2>Conversations</h2>
                 </div>
-                <div id="destinations-list" class="conversations flex-grow overflow-y-auto">
+                <div id="destinations-list">
                     <!-- Destination items will be injected here -->
                 </div>
             </div>
 
             <!-- Right Column: Chat Log and Input -->
-            <div class="w-2/3 flex flex-col">
-                <div id="log" class="log-area flex-grow p-4 space-y-4 overflow-y-auto">
+            <div class="chat-panel">
+                <div id="log">
                     <!-- Message bubbles will be injected here -->
                 </div>
-                <div id="input-area" class="flex-shrink-0 p-4 bg-gray-100 border-t">
-                    <div class="flex items-center space-x-3">
-                        <input type="text" id="destCallsignInput" class="border border-gray-300 rounded-lg px-4 py-2 w-36 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="DEST">
-                        <input type="text" id="messageInput" class="flex-grow border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Select a conversation...">
-                        <button id="sendButton" class="bg-indigo-600 text-white font-bold py-2 px-5 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50 transition-colors duration-300">
-                            Send
-                        </button>
+                <div id="input-area" class="input-area">
+                    <div class="input-area-flex">
+                        <input type="text" id="destCallsignInput" placeholder="DEST">
+                        <input type="text" id="messageInput" placeholder="Select a conversation...">
+                        <button id="sendButton" class="btn btn-indigo">Send</button>
                     </div>
                 </div>
             </div>
@@ -69,26 +197,26 @@
     </div>
 
     <!-- Callsign Modal -->
-    <div id="callsign-modal" class="hidden modal fixed inset-0 bg-gray-900 bg-opacity-60 flex items-center justify-center z-50">
-        <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-sm">
-            <h2 class="text-xl font-bold mb-4">Enter Your Callsign</h2>
-            <p class="text-sm text-gray-600 mb-4">Your callsign is required to send packets and is saved locally for future sessions.</p>
-            <input type="text" id="modalCallsignInput" class="w-full border border-gray-300 rounded-lg px-4 py-2 mb-4 uppercase" placeholder="YOUR-CALLSIGN">
-            <div class="flex justify-end space-x-3">
-                <button id="cancelConnectButton" class="bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-400">Cancel</button>
-                <button id="saveAndConnectButton" class="bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700">Save & Connect</button>
+    <div id="callsign-modal" class="modal">
+        <div class="modal-content">
+            <h2>Enter Your Callsign</h2>
+            <p>Your callsign is required to send packets and is saved locally for future sessions.</p>
+            <input type="text" id="modalCallsignInput" placeholder="YOUR-CALLSIGN">
+            <div class="modal-actions">
+                <button id="cancelConnectButton" class="btn btn-gray">Cancel</button>
+                <button id="saveAndConnectButton" class="btn btn-blue">Save & Connect</button>
             </div>
         </div>
     </div>
 
     <!-- Delete Confirmation Modal -->
-    <div id="delete-confirm-modal" class="hidden modal fixed inset-0 bg-gray-900 bg-opacity-60 flex items-center justify-center z-50">
-        <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-sm">
-            <h2 class="text-xl font-bold mb-4">Confirm Deletion</h2>
-            <p id="delete-confirm-text" class="text-sm text-gray-600 mb-6"></p>
-            <div class="flex justify-end space-x-3">
-                <button id="cancelDeleteButton" class="bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-400">Cancel</button>
-                <button id="confirmDeleteButton" class="bg-red-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-700">Delete</button>
+    <div id="delete-confirm-modal" class="modal">
+        <div class="modal-content">
+            <h2>Confirm Deletion</h2>
+            <p id="delete-confirm-text"></p>
+            <div class="modal-actions">
+                <button id="cancelDeleteButton" class="btn btn-gray">Cancel</button>
+                <button id="confirmDeleteButton" class="btn btn-red">Delete</button>
             </div>
         </div>
     </div>
@@ -138,10 +266,10 @@
         connectBtn.addEventListener('click', handleConnectionToggle);
         digipeatCheckbox.addEventListener('change', (e) => isDigipeaterEnabled = e.target.checked);
         
-        cancelConnectButton.addEventListener('click', () => callsignModal.classList.add('hidden'));
+        cancelConnectButton.addEventListener('click', () => callsignModal.style.display = 'none');
         saveAndConnectButton.addEventListener('click', handleSaveAndConnect);
         
-        cancelDeleteButton.addEventListener('click', () => deleteConfirmModal.classList.add('hidden'));
+        cancelDeleteButton.addEventListener('click', () => deleteConfirmModal.style.display = 'none');
         
         sendButton.addEventListener('click', sendMessage);
         messageInput.addEventListener('keyup', (event) => {
@@ -182,7 +310,7 @@
 
         async function handleConnectionToggle() {
             if (isConnected) await disconnect();
-            else if (!userCallsign) callsignModal.classList.remove('hidden');
+            else if (!userCallsign) callsignModal.style.display = 'flex';
             else await connect();
         }
 
@@ -191,7 +319,7 @@
             if (!callsign) { alert("Please enter a callsign."); return; }
             userCallsign = callsign;
             localStorage.setItem(CALLSIGN_STORAGE_KEY, userCallsign);
-            callsignModal.classList.add('hidden');
+            callsignModal.style.display = 'none';
             await connect();
         }
 
@@ -224,9 +352,9 @@
             deleteConfirmText.textContent = `Are you sure you want to delete the entire conversation with ${destination}? This action cannot be undone.`;
             confirmDeleteButton.onclick = () => {
                 deleteConversation(destination);
-                deleteConfirmModal.classList.add('hidden');
+                deleteConfirmModal.style.display = 'none';
             };
-            deleteConfirmModal.classList.remove('hidden');
+            deleteConfirmModal.style.display = 'flex';
         }
 
         function deleteConversation(destination) {
@@ -441,15 +569,15 @@
                 let bubble;
                 let ackHtml = '';
                 if (msg.type === 'sent' && msg.ackedBy && msg.ackedBy.length > 0) {
-                     ackHtml = `<div class="text-xs text-blue-200 text-right mt-1">✓ Delivered to: ${msg.ackedBy.join(', ')}</div>`;
+                     ackHtml = `<div class="bubble-ack">✓ Delivered to: ${msg.ackedBy.join(', ')}</div>`;
                 }
 
                 if (msg.type === 'sent') {
-                    bubble = `<div class="flex justify-end"><div class="bg-blue-500 text-white p-3 rounded-lg max-w-md" style="word-break: break-word;"><div>${msg.content}</div><div class="text-xs text-blue-100 text-right mt-1">${new Date(msg.timestamp).toLocaleTimeString()}</div>${ackHtml}</div></div>`;
+                    bubble = `<div class="bubble-sent-wrapper"><div class="bubble bubble-sent"><div>${msg.content}</div><div class="bubble-timestamp">${new Date(msg.timestamp).toLocaleTimeString()}</div>${ackHtml}</div></div>`;
                 } else if (msg.type === 'received') {
-                    bubble = `<div class="flex justify-start"><div class="bg-gray-200 text-gray-800 p-3 rounded-lg max-w-md" style="word-break: break-word;"><div><span class="font-bold text-sm">${msg.source}</span></div><div>${msg.content}</div><div class="text-xs text-gray-500 text-right mt-1">${new Date(msg.timestamp).toLocaleTimeString()}</div></div></div>`;
+                    bubble = `<div class="bubble-received-wrapper"><div class="bubble bubble-received"><div class="bubble-source">${msg.source}</div><div>${msg.content}</div><div class="bubble-timestamp">${new Date(msg.timestamp).toLocaleTimeString()}</div></div></div>`;
                 } else {
-                     bubble = `<div class="text-center text-sm text-gray-500 italic py-2">${msg.content} (${new Date(msg.timestamp).toLocaleTimeString()})</div>`;
+                     bubble = `<div class="system-message">${msg.content} (${new Date(msg.timestamp).toLocaleTimeString()})</div>`;
                 }
                 log.innerHTML += bubble;
             });
@@ -462,10 +590,12 @@
             const allDests = ['All', ...partners];
             allDests.forEach(dest => {
                 const item = document.createElement('div');
-                item.className = `flex justify-between items-center pr-2 cursor-pointer border-b hover:bg-gray-200 ${selectedDestination === dest ? 'bg-blue-100' : ''}`;
+                item.className = 'conversation-item';
+                if(selectedDestination === dest) item.classList.add('selected');
                 
                 const callsignSpan = document.createElement('span');
-                callsignSpan.className = `flex-grow p-3 ${selectedDestination === dest ? 'font-semibold' : ''}`;
+                callsignSpan.className = 'conversation-callsign';
+                if(selectedDestination === dest) callsignSpan.classList.add('selected');
                 callsignSpan.textContent = dest;
                 callsignSpan.onclick = () => selectDestination(dest);
                 item.appendChild(callsignSpan);
@@ -473,7 +603,7 @@
                 if (dest !== 'All') {
                     const deleteBtn = document.createElement('button');
                     deleteBtn.innerHTML = '&#x2715;';
-                    deleteBtn.className = 'text-gray-400 hover:text-red-500 font-bold px-2 rounded-full hover:bg-red-100';
+                    deleteBtn.className = 'delete-btn';
                     deleteBtn.title = `Delete conversation with ${dest}`;
                     deleteBtn.onclick = (e) => { e.stopPropagation(); showDeleteConfirmModal(dest); };
                     item.appendChild(deleteBtn);
@@ -491,17 +621,17 @@
         }
 
         function updateUIForConnection() {
-            statusIndicator.className = 'h-3 w-3 rounded-full bg-green-500';
+            statusIndicator.style.backgroundColor = '#22c55e'; // green-500
             statusText.textContent = `Connected (${userCallsign})`;
             connectBtn.textContent = 'Disconnect';
-            connectBtn.className = 'bg-red-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors duration-300';
+            connectBtn.className = 'btn btn-red';
         }
         
         function updateUIForDisconnection() {
-            statusIndicator.className = 'h-3 w-3 rounded-full bg-red-500';
+            statusIndicator.style.backgroundColor = '#ef4444'; // red-500
             statusText.textContent = 'Disconnected';
             connectBtn.textContent = 'Connect';
-            connectBtn.className = 'bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-300';
+            connectBtn.className = 'btn btn-blue';
             logMessage({ type: 'system', content: 'Disconnected.', timestamp: new Date() });
         }
 
