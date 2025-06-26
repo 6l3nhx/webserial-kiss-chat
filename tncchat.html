@@ -249,10 +249,64 @@
                 seenPackets.delete(expiredPacket.id);
             }
         }
+        
+        // --- Delivery Receipt (ACK) Logic ---
+
+        function simpleChecksum(str) {
+            let sum = 0;
+            for (let i = 0; i < str.length; i++) {
+                sum += str.charCodeAt(i);
+            }
+            return sum.toString(16); // Return as hex string
+        }
+
+        function queueAck(originalMessage) {
+            const checksum = simpleChecksum(originalMessage.content);
+            const ackContent = `ACK:${checksum}`;
+            
+            const delay = Math.random() * 10000 + 5000; // 5 to 15 seconds
+
+            setTimeout(() => {
+                sendPacket(originalMessage.source, ackContent, true);
+            }, delay);
+        }
+
+        function processAck(ackContent, ackSender) {
+            const parts = ackContent.split(':');
+            if (parts.length < 2) return;
+            const receivedChecksum = parts[1];
+
+            // Find the message this ACK is for
+            const originalMessage = allMessages.find(msg => 
+                msg.type === 'sent' && 
+                msg.destination === ackSender &&
+                simpleChecksum(msg.content) === receivedChecksum
+            );
+
+            if (originalMessage) {
+                if (!originalMessage.ackedBy) {
+                    originalMessage.ackedBy = [];
+                }
+                if (!originalMessage.ackedBy.includes(ackSender)) {
+                    originalMessage.ackedBy.push(ackSender);
+                    logMessage({ type: 'system', content: `Delivery confirmed by ${ackSender}`, timestamp: new Date() });
+                    // Persist the changes and re-render
+                    localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(allMessages));
+                    rebuildConversationsFromMessages();
+                    renderMessages();
+                }
+            }
+        }
 
         async function digipeatPacket(ax25Data) {
             if (!writer) return;
-            const kissFrame = [CMD_DATA, ...ax25Data];
+            // Re-escape the frame for KISS
+            const kissFrame = [CMD_DATA];
+            for (const byte of ax25Data) {
+                if (byte === FEND) { kissFrame.push(FESC, TFEND); }
+                else if (byte === FESC) { kissFrame.push(FESC, TFESC); }
+                else { kissFrame.push(byte); }
+            }
             const finalPacket = new Uint8Array([FEND, ...kissFrame, FEND]);
             try {
                 await writer.write(finalPacket);
@@ -284,31 +338,43 @@
             return call;
         }
 
-        async function sendMessage() {
-            const destCall = (selectedDestination === 'All' ? destCallsignInput.value.trim().toUpperCase() : selectedDestination);
-            const info = messageInput.value;
-            if (!destCall || !info || !writer) return;
-
-            const destAddr = encodeCallsign(destCall), srcAddr = encodeCallsign(userCallsign);
-            srcAddr[6] |= 0b00000001;
-            const ax25Packet = new Uint8Array([ ...destAddr, ...srcAddr, 0x03, 0xF0, ...new TextEncoder().encode(info) ]);
+        async function createKissPacket(destination, content) {
+            const destAddr = encodeCallsign(destination);
+            const srcAddr = encodeCallsign(userCallsign);
+            srcAddr[6] |= 0b00000001; // Set C-bit for source
+            const infoBytes = new TextEncoder().encode(content);
+            const ax25Packet = new Uint8Array([ ...destAddr, ...srcAddr, 0x03, 0xF0, ...infoBytes ]);
+            
             const kissFrame = [CMD_DATA];
             for (const byte of ax25Packet) {
-                if (byte === FEND) kissFrame.push(FESC, TFEND);
-                else if (byte === FESC) kissFrame.push(FESC, TFESC);
-                else kissFrame.push(byte);
+                if (byte === FEND) { kissFrame.push(FESC, TFEND); }
+                else if (byte === FESC) { kissFrame.push(FESC, TFESC); }
+                else { kissFrame.push(byte); }
             }
-            const finalPacket = new Uint8Array([FEND, ...kissFrame, FEND]);
-
-            try {
+            return new Uint8Array([FEND, ...kissFrame, FEND]);
+        }
+        
+        async function sendPacket(destination, content, isAck = false) {
+             if (!destination || !content || !writer) return;
+             const finalPacket = await createKissPacket(destination, content);
+             try {
                 await writer.write(finalPacket);
-                const messageObj = { type: 'sent', destination: destCall, source: userCallsign, content: info, timestamp: new Date() };
-                logMessage(messageObj);
-                messageInput.value = '';
-            } catch (error) {
+                if (!isAck) {
+                     const messageObj = { type: 'sent', destination, source: userCallsign, content, timestamp: new Date(), ackedBy: [] };
+                     logMessage(messageObj);
+                     messageInput.value = '';
+                } else {
+                     logMessage({ type: 'system', content: `Sent delivery receipt to ${destination}`, timestamp: new Date() });
+                }
+             } catch(error) {
                 logMessage({ type: 'error', content: `Send error: ${error.message}`, timestamp: new Date() });
                 await disconnect();
-            }
+             }
+        }
+
+        async function sendMessage() {
+            const destCall = (selectedDestination === 'All' ? destCallsignInput.value.trim().toUpperCase() : selectedDestination);
+            await sendPacket(destCall, messageInput.value);
         }
 
         async function listenForData() {
@@ -337,19 +403,23 @@
             if (unescaped.shift() !== CMD_DATA || unescaped.length < 16) return;
 
             const ax25Data = new Uint8Array(unescaped);
-            const packetHash = `${ax25Data.slice(7, 14).toString()}-${ax25Data.slice(16).toString()}`;
-            if (seenPackets.has(packetHash)) return;
+            const source = decodeCallsign(ax25Data.slice(7, 14));
+            const destination = decodeCallsign(ax25Data.slice(0, 7));
+            const content = new TextDecoder().decode(ax25Data.slice(16));
 
+            // Use a more robust hash for seen packets
+            const packetHash = `${source}>${destination}:${content}`;
+            if (seenPackets.has(packetHash) || source === userCallsign) return;
+            
             seenPackets.add(packetHash);
             seenPacketQueue.push({ id: packetHash, timestamp: Date.now() });
             
-            logMessage({
-                type: 'received',
-                destination: decodeCallsign(ax25Data.slice(0, 7)),
-                source: decodeCallsign(ax25Data.slice(7, 14)),
-                content: new TextDecoder().decode(ax25Data.slice(16)),
-                timestamp: new Date()
-            });
+            if (content.startsWith('ACK:')) {
+                processAck(content, source);
+            } else {
+                logMessage({ type: 'received', destination, source, content, timestamp: new Date() });
+                queueAck({ source, content });
+            }
 
             if (isDigipeaterEnabled) digipeatPacket(ax25Data);
         }
@@ -369,8 +439,13 @@
             
             messagesToRender.forEach(msg => {
                 let bubble;
+                let ackHtml = '';
+                if (msg.type === 'sent' && msg.ackedBy && msg.ackedBy.length > 0) {
+                     ackHtml = `<div class="text-xs text-blue-200 text-right mt-1">✓ Delivered to: ${msg.ackedBy.join(', ')}</div>`;
+                }
+
                 if (msg.type === 'sent') {
-                    bubble = `<div class="flex justify-end"><div class="bg-blue-500 text-white p-3 rounded-lg max-w-md" style="word-break: break-word;"><div>${msg.content}</div><div class="text-xs text-blue-200 text-right mt-1">${new Date(msg.timestamp).toLocaleTimeString()}</div></div></div>`;
+                    bubble = `<div class="flex justify-end"><div class="bg-blue-500 text-white p-3 rounded-lg max-w-md" style="word-break: break-word;"><div>${msg.content}</div><div class="text-xs text-blue-100 text-right mt-1">${new Date(msg.timestamp).toLocaleTimeString()}</div>${ackHtml}</div></div>`;
                 } else if (msg.type === 'received') {
                     bubble = `<div class="flex justify-start"><div class="bg-gray-200 text-gray-800 p-3 rounded-lg max-w-md" style="word-break: break-word;"><div><span class="font-bold text-sm">${msg.source}</span></div><div>${msg.content}</div><div class="text-xs text-gray-500 text-right mt-1">${new Date(msg.timestamp).toLocaleTimeString()}</div></div></div>`;
                 } else {
