@@ -309,9 +309,13 @@
         }
 
         async function handleConnectionToggle() {
-            if (isConnected) await disconnect();
-            else if (!userCallsign) callsignModal.style.display = 'flex';
-            else await connect();
+            if (isConnected) {
+                await disconnect();
+            } else {
+                // Always show the modal when connecting to allow changing callsign
+                modalCallsignInput.value = userCallsign;
+                callsignModal.style.display = 'flex';
+            }
         }
 
         async function handleSaveAndConnect() {
